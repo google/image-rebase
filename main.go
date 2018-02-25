@@ -29,11 +29,10 @@ import (
 const scope = "https://www.googleapis.com/auth/devstorage.read_write"
 
 var (
-	robotEmail = flag.String("robot_email", "", "Robot account email address.")
-	deriv      = flag.String("deriv", "", "Image to rebase")
-	oldBase    = flag.String("old_base", "", "Old base to remove")
-	newBase    = flag.String("new_base", "", "New base to replace with")
-	rebased    = flag.String("tag", "", "Rebased image to push")
+	orig    = flag.String("original", "", "Original image to rebase")
+	oldBase = flag.String("old_base", "", "Old base to remove") // TODO: Detect old base using LABEL?
+	newBase = flag.String("new_base", "", "New base to replace with")
+	rebased = flag.String("rebased", "", "New rebased image tag to push") // Default to --original ?
 )
 
 func main() {
@@ -47,7 +46,7 @@ func main() {
 	}
 	r := rebase.Rebaser{c}
 	if err := r.Rebase(
-		rebase.FromString(*deriv),
+		rebase.FromString(*orig),
 		rebase.FromString(*oldBase),
 		rebase.FromString(*newBase),
 		rebase.FromString(*rebased),

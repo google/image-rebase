@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"regexp"
 )
@@ -78,7 +79,8 @@ func (n ImageName) String() string {
 	case digest:
 		return fmt.Sprintf("%s/%s@%s", n.Registry, n.Repository, n.TagOrDigest)
 	}
-	panic("invalid reference")
+	log.Fatal("invalid reference")
+	return ""
 }
 
 var (
@@ -101,8 +103,9 @@ func FromString(s string) ImageName {
 		return ImageName{parts[1], parts[2], tag(parts[3])}
 	}
 
-	// Otherwise, panic.
-	panic("invalid reference")
+	// Otherwise, fatal.
+	log.Fatalf("invalid reference %q", s)
+	return ImageName{}
 }
 
 // Rebase constructs and pushes a new image based on orig, with layers from
