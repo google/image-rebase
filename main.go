@@ -17,12 +17,16 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
-	"net/http"
+
+	"golang.org/x/oauth2/google"
 
 	"github.com/GoogleCloudPlatform/image-rebase/pkg/rebase"
 )
+
+const scope = "https://www.googleapis.com/auth/devstorage.read_write"
 
 var (
 	robotEmail = flag.String("robot_email", "", "Robot account email address.")
@@ -34,12 +38,14 @@ var (
 
 func main() {
 	flag.Parse()
+	ctx := context.Background()
 
-	r := rebase.Rebaser{
-		Client: &http.Client{
-		// TODO: transport with token
-		},
+	// TODO: Shell out to docker-credential-gcr to get auth for any registry.
+	c, err := google.DefaultClient(ctx, scope)
+	if err != nil {
+		log.Fatalf("Failed to set up Google auth client: %v", err)
 	}
+	r := rebase.Rebaser{c}
 	if err := r.Rebase(
 		rebase.FromString(*deriv),
 		rebase.FromString(*oldBase),
