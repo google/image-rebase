@@ -3,3 +3,7 @@ steps:
   args: ['test', '//pkg/...']
 - name: 'gcr.io/cloud-builders/bazel'
   args: ['run', '//:push']
+
+# Run the example.
+- name: 'gcr.io/cloud-builders/gcloud'
+  args: ['container', 'builds', 'submit', 'example/', '--config=example/cloudbuild.yaml']

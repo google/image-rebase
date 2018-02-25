@@ -103,6 +103,8 @@ func FromString(s string) *ImageName {
 		return &ImageName{parts[1], parts[2], tag(parts[3])}
 	}
 
+	// TODO: Handle untagged images by assuming :latest.
+
 	// Otherwise, fatal.
 	log.Printf("invalid reference %q", s)
 	return nil
@@ -239,7 +241,7 @@ func (h HTTPError) Error() string {
 // "Get Manifest" from
 // https://docs.docker.com/registry/spec/api/#pulling-an-image
 func (r Rebaser) getImageData(name *ImageName) (*imageData, error) {
-	url := fmt.Sprintf("https://%s/v2/%s/manifests/%s", name.Registry, name.Repository, name.TagOrDigest.(digest))
+	url := fmt.Sprintf("https://%s/v2/%s/manifests/%s", name.Registry, name.Repository, name.TagOrDigest)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
