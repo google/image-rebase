@@ -79,7 +79,7 @@ func (n ImageName) String() string {
 	case digest:
 		return fmt.Sprintf("%s/%s@%s", n.Registry, n.Repository, n.TagOrDigest)
 	}
-	log.Fatal("invalid reference")
+	log.Println("invalid reference")
 	return ""
 }
 
@@ -90,28 +90,28 @@ var (
 )
 
 // FromString parses ImageName information from a string reference.
-func FromString(s string) ImageName {
+func FromString(s string) *ImageName {
 	// Try to parse as digest reference first.
 	parts := digestRE.FindStringSubmatch(s)
 	if len(parts) == 4 {
-		return ImageName{parts[1], parts[2], digest(parts[3])}
+		return &ImageName{parts[1], parts[2], digest(parts[3])}
 	}
 
 	// Fall back to parse as tag.
 	parts = tagRE.FindStringSubmatch(s)
 	if len(parts) == 4 {
-		return ImageName{parts[1], parts[2], tag(parts[3])}
+		return &ImageName{parts[1], parts[2], tag(parts[3])}
 	}
 
 	// Otherwise, fatal.
-	log.Fatalf("invalid reference %q", s)
-	return ImageName{}
+	log.Printf("invalid reference %q", s)
+	return nil
 }
 
 // Rebase constructs and pushes a new image based on orig, with layers from
 // oldBase removed and replaced with those in newBase. The new image is pushed
 // to the reference described by rebased.
-func (r Rebaser) Rebase(orig, oldBase, newBase, rebased ImageName) error {
+func (r Rebaser) Rebase(orig, oldBase, newBase, rebased *ImageName) error {
 	if rebased.IsDigest() {
 		return fmt.Errorf("Rebased image cannot specify digest")
 	}
@@ -131,11 +131,16 @@ func (r Rebaser) Rebase(orig, oldBase, newBase, rebased ImageName) error {
 		return fmt.Errorf("GET new base: %v", err)
 	}
 
-	// TODO(jasonhall,b/62250770): Verify that oldBase's layers are present in
-	// orig, otherwise orig is not based on oldBase at all.
+	// Verify that oldBase's layers are present in orig, otherwise orig is
+	// not based on oldBase at all.
+	for i, l := range oldData.manifest.Layers {
+		if origData.manifest.Layers[i].Digest != l.Digest {
+			return fmt.Errorf("%q is not based on %q", orig, oldBase)
+		}
+	}
 
 	// Replace base layers, history and diff_ids.
-	// TODO(jasonhall,b/62250770): Require that original image's top layers
+	// TODO(jasonhall): Require that original image's top layers
 	// includes a LABEL that marks it as a candidate for rebasing on oldBase.
 	origData.manifest.Layers = append(newData.manifest.Layers, origData.manifest.Layers[len(oldData.manifest.Layers):]...)
 	origData.config.History = append(newData.config.History, origData.config.History[len(oldData.config.History):]...)
@@ -233,7 +238,7 @@ func (h HTTPError) Error() string {
 
 // "Get Manifest" from
 // https://docs.docker.com/registry/spec/api/#pulling-an-image
-func (r Rebaser) getImageData(name ImageName) (*imageData, error) {
+func (r Rebaser) getImageData(name *ImageName) (*imageData, error) {
 	url := fmt.Sprintf("https://%s/v2/%s/manifests/%s", name.Registry, name.Repository, name.TagOrDigest.(digest))
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -334,7 +339,7 @@ func (r Rebaser) putBlob(registry, repository, configDigest string, config confi
 
 // "Pushing an image manifest" from
 // https://docs.docker.com/registry/spec/api/#pushing-an-image
-func (r Rebaser) putManifest(name ImageName, manifest manifest) error {
+func (r Rebaser) putManifest(name *ImageName, manifest manifest) error {
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(manifest); err != nil {
 		return err
