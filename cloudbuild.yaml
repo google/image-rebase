@@ -4,9 +4,7 @@ steps:
 
 # Build image and retag to this project's repo.
 - name: 'gcr.io/cloud-builders/bazel'
-  args: ['run', '//:image']
-- name: 'gcr.io/cloud-builders/docker'
-  args: ['tag', 'bazel:image', 'gcr.io/$PROJECT_ID/rebase']
+  args: ['run', '--define', 'project=$PROJECT_ID', '//:push']
 
 # Run a simple example that builds two base images and an image based on one,
 # then rebases it on the other.

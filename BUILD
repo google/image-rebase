@@ -1,5 +1,6 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
 load("@io_bazel_rules_docker//go:image.bzl", "go_image")
+load("@io_bazel_rules_docker//docker:docker.bzl", "container_push")
 
 go_image(
     name = "image",
@@ -8,6 +9,15 @@ go_image(
         "//pkg/rebase:go_default_library",
         "//vendor/golang.org/x/oauth2/google:go_default_library",
     ],
+)
+
+container_push(
+    name = "push",
+    format = "Docker",
+    image = ":image",
+    registry = "gcr.io",
+    repository = "$(project)/rebase",
+    stamp = True,
 )
 
 load("@bazel_gazelle//:def.bzl", "gazelle")
