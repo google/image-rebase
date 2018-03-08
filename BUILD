@@ -24,13 +24,13 @@ load("@bazel_gazelle//:def.bzl", "gazelle")
 
 gazelle(
     name = "gazelle",
-    prefix = "github.com/GoogleCloudPlatform/image-rebase",
+    prefix = "github.com/google/image-rebase",
 )
 
 go_library(
     name = "go_default_library",
     srcs = ["main.go"],
-    importpath = "github.com/GoogleCloudPlatform/image-rebase",
+    importpath = "github.com/google/image-rebase",
     visibility = ["//visibility:private"],
     deps = [
         "//pkg/rebase:go_default_library",

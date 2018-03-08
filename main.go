@@ -23,7 +23,7 @@ import (
 
 	"golang.org/x/oauth2/google"
 
-	"github.com/GoogleCloudPlatform/image-rebase/pkg/rebase"
+	"github.com/google/image-rebase/pkg/rebase"
 )
 
 const scope = "https://www.googleapis.com/auth/devstorage.read_write"
