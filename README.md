@@ -13,7 +13,7 @@ or you want to produce updated images without performing a full rebuild.
 *WARNING:* The image that results from such a rebase might not be valid in all
 cases. More details below, but caveat emptor.
 
-## Using `rebase`
+## Using `image-rebase`
 
 For purposes of illustration, imagine you've built a container image
 `gcr.io/my-project/my-app:latest`, containing your app, and based on some OS
@@ -32,7 +32,7 @@ image, without needing to rebuild from source, or indeed have access to the
 source at all.
 
 ```
-./rebase \
+$ image-rebase \
   --original=gcr.io/my-project/my-app:latest \
   --old_base=launcher.gcr.io/google/ubuntu16_04@sha256:deadbeef... \
   --new_base=launcher.gcr.io/google/ubuntu16_04:latest \
@@ -51,6 +51,47 @@ digests using `gcloud alpha container images describe <image>
 ## Rebase visualized
 
 ![rebase visualization](./rebase.png)
+
+## Installing `image-rebase`
+
+The tool can be installed using `go get`:
+
+```
+go get -u github.com/google/image-rebase
+```
+
+Then, assuming `$GOPATH/bin` is in your `PATH`:
+
+```
+$ image-rebase ...args...
+```
+
+**TODO:** Tagged releases
+
+### Rebase as a Go library
+
+You can also use the `image-rebase` logic as a library in your Go program, by
+importing it:
+
+```
+import "github.com/google/image-rebase/pkg/rebase"
+```
+
+...and using its central method, `Rebase`:
+
+```
+r := rebase.Rebaser{http.DefaultClient} // Or whatever client you want.
+err := r.Rebase(
+   rebase.FromString("gcr.io/my-project/my-app:latest"),
+   rebase.FromString("launcher.gcr.io/google/ubuntu16_04@sha256:deadbeef..."),
+   rebase.FromString("launcher.gcr.io/google/ubuntu16_04:latest"),
+   rebase.FromString("gcr.io/my-project/my-app:rebased"))
+```
+
+**Warning:** This API is not stable, and is _very_ likely to change in breaking
+ways.
+
+**TODO:** Tagged releases
 
 ## Caveats
 
