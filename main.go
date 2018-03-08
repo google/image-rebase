@@ -39,7 +39,21 @@ func main() {
 	flag.Parse()
 	ctx := context.Background()
 
-	// TODO: Shell out to docker-credential-gcr to get auth for any registry.
+	if *orig == "" {
+		log.Fatal("Must specify --original")
+	}
+	if *oldBase == "" {
+		log.Fatal("Must specify --old_base")
+	}
+	if *newBase == "" {
+		log.Fatal("Must specify --new_base")
+	}
+	if *rebased == "" {
+		log.Fatal("Must specify --rebased")
+	}
+
+	// TODO: Shell out to docker-credential-gcr to get auth for any
+	// registry.
 	c, err := google.DefaultClient(ctx, scope)
 	if err != nil {
 		log.Fatalf("Failed to set up Google auth client: %v", err)
