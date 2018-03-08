@@ -141,6 +141,13 @@ func (r Rebaser) Rebase(orig, oldBase, newBase, rebased *ImageName) error {
 		}
 	}
 
+	// If newBase is in another repository (within the same registry) as
+	// rebased, we need to mount those layers into rebased's repository
+	// first.
+	if err := r.mount(rebased, newBase, newData.manifest); err != nil {
+		return err
+	}
+
 	// Replace base layers, history and diff_ids.
 	// TODO(jasonhall): Require that original image's top layers
 	// includes a LABEL that marks it as a candidate for rebasing on oldBase.
@@ -292,25 +299,48 @@ func (r Rebaser) getConfig(registry, repository, configDigest string) (*config, 
 
 // "Cross Repository Blob Mount" from
 // https://docs.docker.com/registry/spec/api/#pushing-an-image
-func (r Rebaser) mount(name ImageName, images []ImageName) error {
-	url := fmt.Sprintf("https://%s/v2/%s/blobs/uploads/?mount=%s", name.Registry, name.Repository, images[0].Repository)
-	for _, i := range images {
-		url += "&from=" + i.String()
+func (r Rebaser) mount(to, from *ImageName, m manifest) error {
+	if to.Repository == from.Repository {
+		// Nothing to cross-repository mount.
+		return nil
 	}
-	req, err := http.NewRequest("POST", url, nil)
-	if err != nil {
-		return err
+	if to.Registry != from.Registry {
+		// TODO: Support cross-*registry* mounts by downloading and
+		// re-uploading the blob to the new registry (i.e., mirroring).
+		return fmt.Errorf("Cannot mount cross-registry from %s to %s", from.Registry, to.Registry)
 	}
-	req.Header.Set("Accept", accept)
-	resp, err := r.Client.Do(req)
-	if err != nil {
-		return err
-	}
-	// If the blob is successfully mounted, registry will respond with 201 Created.
-	// Otherwise, registry will fall back to standard upload and return 202 Accepted.
-	// Either is acceptable.
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
-		return HTTPError{resp}
+
+	for _, l := range m.Layers {
+		url := fmt.Sprintf("https://%s/v2/%s/blobs/uploads/?mount=%s&from=%s", to.Registry, to.Repository, l.Digest, from.Repository)
+		req, err := http.NewRequest("POST", url, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Accept", accept)
+		resp, err := r.Client.Do(req)
+		if err != nil {
+			return fmt.Errorf("Error mounting %s from %s to %s", l.Digest, from.Repository, to.Repository)
+		}
+		// If the blob is successfully mounted, registry will respond with 201 Created.
+		// Otherwise, registry will fall back to standard upload and return 202 Accepted.
+		// Either is acceptable.
+		if resp.StatusCode == http.StatusAccepted {
+			// This status might be returned if the digest or from
+			// params are invalid, or if the registry doesn't
+			// support cross-repo mounts.  TODO: Check whether the
+			// digest exists in the from repository, to determine
+			// whether the registry is telling us it doesn't
+			// support cross-repo mounts.
+			//
+			// In either case, this indicates we need to download
+			// then re-upload the blob to the new repository.
+			// TODO: Download-then-reupload the blob to the new
+			// repository.
+			return HTTPError{resp}
+		}
+		if resp.StatusCode != http.StatusCreated {
+			return HTTPError{resp}
+		}
 	}
 	return nil
 }
