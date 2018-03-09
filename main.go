@@ -17,13 +17,11 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"flag"
 	"log"
 
-	"golang.org/x/oauth2/google"
-
 	"github.com/google/image-rebase/pkg/rebase"
+	"github.com/google/image-rebase/pkg/transport"
 )
 
 const scope = "https://www.googleapis.com/auth/devstorage.read_write"
@@ -37,14 +35,21 @@ var (
 
 func main() {
 	flag.Parse()
-	ctx := context.Background()
 
-	// TODO: Shell out to docker-credential-gcr to get auth for any registry.
-	c, err := google.DefaultClient(ctx, scope)
-	if err != nil {
-		log.Fatalf("Failed to set up Google auth client: %v", err)
+	if *orig == "" {
+		log.Fatal("Must specify --original")
 	}
-	r := rebase.Rebaser{c}
+	if *oldBase == "" {
+		log.Fatal("Must specify --old_base")
+	}
+	if *newBase == "" {
+		log.Fatal("Must specify --new_base")
+	}
+	if *rebased == "" {
+		log.Fatal("Must specify --rebased")
+	}
+
+	r := rebase.Rebaser{transport.NewDockerCredsClient(nil)}
 	if err := r.Rebase(
 		rebase.FromString(*orig),
 		rebase.FromString(*oldBase),

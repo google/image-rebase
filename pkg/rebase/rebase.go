@@ -120,7 +120,7 @@ func (r Rebaser) Rebase(orig, oldBase, newBase, rebased *ImageName) error {
 
 	origData, err := r.getImageData(orig)
 	if err != nil {
-		return fmt.Errorf("GET original derivative: %v", err)
+		return fmt.Errorf("GET original: %v", err)
 	}
 
 	oldData, err := r.getImageData(oldBase)
