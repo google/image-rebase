@@ -8,7 +8,6 @@ go_image(
     deps = [
         "//pkg/rebase:go_default_library",
         "//pkg/transport:go_default_library",
-        "//vendor/golang.org/x/oauth2/google:go_default_library",
     ],
 )
 

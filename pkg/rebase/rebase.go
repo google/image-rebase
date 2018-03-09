@@ -26,7 +26,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"regexp"
+
+	"github.com/docker/distribution/reference"
 )
 
 const (
@@ -41,80 +42,11 @@ type Rebaser struct {
 	Client *http.Client
 }
 
-// ImageName represents an image reference, whether by tag or digest.
-type ImageName struct {
-	Registry    string
-	Repository  string
-	TagOrDigest tagOrDigest
-}
-
-// IsTag is true if the image references an image by tag.
-func (n ImageName) IsTag() bool {
-	_, ok := n.TagOrDigest.(tag)
-	return ok
-}
-
-// IsDigest is true if the image references an image by digest.
-func (n ImageName) IsDigest() bool {
-	_, ok := n.TagOrDigest.(digest)
-	return ok
-}
-
-type tagOrDigest interface {
-	isTagOrDigest()
-}
-
-type tag string
-
-func (t tag) isTagOrDigest() {}
-
-type digest string
-
-func (d digest) isTagOrDigest() {}
-
-func (n ImageName) String() string {
-	switch n.TagOrDigest.(type) {
-	case tag:
-		return fmt.Sprintf("%s/%s:%s", n.Registry, n.Repository, n.TagOrDigest)
-	case digest:
-		return fmt.Sprintf("%s/%s@%s", n.Registry, n.Repository, n.TagOrDigest)
-	}
-	log.Println("invalid reference")
-	return ""
-}
-
-var (
-	// TODO(jasonhall): Use canonical regexps and canonical parsing.
-	digestRE = regexp.MustCompile("(gcr.io)/([a-z-/0-9]+)@(.*)")
-	tagRE    = regexp.MustCompile("(gcr.io)/([a-z-/0-9]+):(.*)")
-)
-
-// FromString parses ImageName information from a string reference.
-func FromString(s string) *ImageName {
-	// Try to parse as digest reference first.
-	parts := digestRE.FindStringSubmatch(s)
-	if len(parts) == 4 {
-		return &ImageName{parts[1], parts[2], digest(parts[3])}
-	}
-
-	// Fall back to parse as tag.
-	parts = tagRE.FindStringSubmatch(s)
-	if len(parts) == 4 {
-		return &ImageName{parts[1], parts[2], tag(parts[3])}
-	}
-
-	// TODO: Handle untagged images by assuming :latest.
-
-	// Otherwise, fatal.
-	log.Printf("invalid reference %q", s)
-	return nil
-}
-
 // Rebase constructs and pushes a new image based on orig, with layers from
 // oldBase removed and replaced with those in newBase. The new image is pushed
 // to the reference described by rebased.
 func (r Rebaser) Rebase(orig, oldBase, newBase, rebased *ImageName) error {
-	if rebased.IsDigest() {
+	if rebased.isDigest() {
 		return fmt.Errorf("Rebased image cannot specify digest")
 	}
 
@@ -168,7 +100,7 @@ func (r Rebaser) Rebase(orig, oldBase, newBase, rebased *ImageName) error {
 	origData.manifest.Config.Size = len(b)
 
 	// PUT new config blob.
-	if err := r.putBlob(rebased.Registry, rebased.Repository, origData.manifest.Config.Digest, origData.config); err != nil {
+	if err := r.putBlob(rebased.reg, rebased.repo, origData.manifest.Config.Digest, origData.config); err != nil {
 		return fmt.Errorf("POST new config blob: %v", err)
 	}
 
@@ -245,10 +177,54 @@ func (h HTTPError) Error() string {
 	return fmt.Sprintf("HTTP error %d\n%s", h.Resp.StatusCode, string(all))
 }
 
+type ImageName struct {
+	reg, repo, tag, dig string
+}
+
+func FromString(s string) *ImageName {
+	ref, err := reference.Parse(s)
+	if err != nil {
+		log.Printf("Failed to parse image name: %v", err)
+		return nil
+	}
+	named := ref.(reference.Named)
+	reg, repo := reference.SplitHostname(named)
+	if reg == "" {
+		reg = "index.docker.io"
+	}
+
+	var tag, dig string
+	tagged, ok := named.(reference.Tagged)
+	if ok {
+		tag = tagged.Tag()
+		dig = ""
+	} else {
+		digested, ok := named.(reference.Digested)
+		if ok {
+			tag = ""
+			dig = digested.Digest().String()
+		} else {
+			tag = "latest"
+			dig = ""
+		}
+	}
+	return &ImageName{reg, repo, tag, dig}
+}
+
+func (i ImageName) tagOrDigest() string {
+	if i.tag != "" {
+		return i.tag
+	}
+	return i.dig
+}
+func (i ImageName) isDigest() bool {
+	return i.dig != ""
+}
+
 // "Get Manifest" from
 // https://docs.docker.com/registry/spec/api/#pulling-an-image
 func (r Rebaser) getImageData(name *ImageName) (*imageData, error) {
-	url := fmt.Sprintf("https://%s/v2/%s/manifests/%s", name.Registry, name.Repository, name.TagOrDigest)
+	url := fmt.Sprintf("https://%s/v2/%s/manifests/%s", name.reg, name.repo, name.tagOrDigest())
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -267,7 +243,7 @@ func (r Rebaser) getImageData(name *ImageName) (*imageData, error) {
 		return nil, err
 	}
 	// Next, look up the config file blob and decode it from JSON.
-	config, err := r.getConfig(name.Registry, name.Repository, m.Config.Digest)
+	config, err := r.getConfig(name.reg, name.repo, m.Config.Digest)
 	if err != nil {
 		return nil, err
 	}
@@ -300,18 +276,18 @@ func (r Rebaser) getConfig(registry, repository, configDigest string) (*config, 
 // "Cross Repository Blob Mount" from
 // https://docs.docker.com/registry/spec/api/#pushing-an-image
 func (r Rebaser) mount(to, from *ImageName, m manifest) error {
-	if to.Repository == from.Repository {
+	if to.repo == from.repo {
 		// Nothing to cross-repository mount.
 		return nil
 	}
-	if to.Registry != from.Registry {
+	if to.reg != from.reg {
 		// TODO: Support cross-*registry* mounts by downloading and
 		// re-uploading the blob to the new registry (i.e., mirroring).
-		return fmt.Errorf("Cannot mount cross-registry from %s to %s", from.Registry, to.Registry)
+		return fmt.Errorf("Cannot mount cross-registry from %s to %s", from.reg, to.reg)
 	}
 
 	for _, l := range m.Layers {
-		url := fmt.Sprintf("https://%s/v2/%s/blobs/uploads/?mount=%s&from=%s", to.Registry, to.Repository, l.Digest, from.Repository)
+		url := fmt.Sprintf("https://%s/v2/%s/blobs/uploads/?mount=%s&from=%s", to.reg, to.repo, l.Digest, from.repo)
 		req, err := http.NewRequest("POST", url, nil)
 		if err != nil {
 			return err
@@ -319,7 +295,7 @@ func (r Rebaser) mount(to, from *ImageName, m manifest) error {
 		req.Header.Set("Accept", accept)
 		resp, err := r.Client.Do(req)
 		if err != nil {
-			return fmt.Errorf("Error mounting %s from %s to %s", l.Digest, from.Repository, to.Repository)
+			return fmt.Errorf("Error mounting %s from %s to %s", l.Digest, from.repo, to.repo)
 		}
 		// If the blob is successfully mounted, registry will respond with 201 Created.
 		// Otherwise, registry will fall back to standard upload and return 202 Accepted.
@@ -376,7 +352,7 @@ func (r Rebaser) putManifest(name *ImageName, manifest manifest) error {
 	if err := json.NewEncoder(&buf).Encode(manifest); err != nil {
 		return err
 	}
-	url := fmt.Sprintf("https://%s/v2/%s/manifests/%s", name.Registry, name.Repository, name.TagOrDigest.(tag))
+	url := fmt.Sprintf("https://%s/v2/%s/manifests/%s", name.reg, name.repo, name.tag)
 	req, err := http.NewRequest("PUT", url, &buf)
 	if err != nil {
 		return err

@@ -5,6 +5,7 @@ go_library(
     srcs = ["rebase.go"],
     importpath = "github.com/google/image-rebase/pkg/rebase",
     visibility = ["//visibility:public"],
+    deps = ["//vendor/github.com/docker/distribution/reference:go_default_library"],
 )
 
 go_test(
