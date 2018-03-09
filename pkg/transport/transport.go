@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"os/exec"
 	"path"
@@ -101,8 +102,114 @@ func (t *transport) RoundTrip(r *http.Request) (*http.Response, error) {
 		}
 	}
 
-	// Fallback to sending request without creds. Hope it works!
-	return t.inner.RoundTrip(r)
+	// Fallback to sending request without creds.
+	resp, err := t.inner.RoundTrip(r)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusOK {
+		return resp, nil
+	}
+
+	// If response is 401 and there's an Authentication Realm, try to use
+	// it to get a token. Dockerhub uses this for public images.
+	if v := resp.Header.Get("Www-Authenticate"); resp.StatusCode == http.StatusUnauthorized && v != "" {
+		// Check for an Authentication Realm in the response header.
+		// https://docs.docker.com/registry/spec/auth/token/#how-to-authenticate
+		realm, service, scope := parseWwwAuthenticate(v)
+
+		// Didn't find an HTTP Authentication Realm to authorize at.
+		if realm == "" {
+			return resp, nil
+		}
+
+		tok, err := t.getToken(realm, service, scope)
+		if err != nil {
+			return nil, err
+		}
+
+		r.Header.Set("Authorization", "Bearer "+tok)
+		// Don't cache this token, since tokens used from cache assume
+		// "Basic" auth, and since the token might expire after some
+		// amount of time. Instead, we'll go through the
+		// WwwAuthenticate dance each time. :(
+		// TODO: Allow this to be cached, with "Bearer" and expiration.
+		return t.inner.RoundTrip(r)
+	}
+
+	return resp, nil
+}
+
+func parseWwwAuthenticate(v string) (realm, service, scope string) {
+	v = v[strings.Index(v, " ")+1:]
+	for {
+		equal := strings.Index(v, "=")
+		if equal == -1 {
+			return
+		}
+		comma := strings.Index(v[equal:], ",")
+		end := equal + comma
+		if comma == -1 {
+			end = len(v)
+		}
+
+		key := v[:equal]
+		val := v[equal+2 : end-1] // strip ""s
+
+		if key == "realm" {
+			realm = val
+		}
+		if key == "service" {
+			service = val
+		}
+		if key == "scope" {
+			scope = val
+		}
+
+		if end == len(v) {
+			return
+		}
+		v = v[equal+comma+1:]
+	}
+	panic("unreachable")
+}
+
+func (t *transport) getToken(realm, service, scope string) (string, error) {
+	url := fmt.Sprintf("%s?service=%s&scope=%s", realm, service, scope)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+
+	aresp, err := t.inner.RoundTrip(req)
+	if err != nil {
+		return "", err
+	}
+
+	if aresp.StatusCode == http.StatusOK {
+		var tok struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(aresp.Body).Decode(&tok); err != nil {
+			return "", err
+		}
+		return tok.Token, nil
+	}
+	return "", HTTPError{aresp}
+}
+
+// HTTPError represents an HTTP error encountered during authorizing the request.
+type HTTPError struct {
+	// Resp is the HTTP response returned by the server.
+	Resp *http.Response
+}
+
+func (h HTTPError) Error() string {
+	b, err := httputil.DumpResponse(h.Resp, true)
+	if err != nil {
+		return err.Error()
+	}
+	return fmt.Sprintf("HTTP error %d\n%s", h.Resp.StatusCode, string(b))
 }
 
 func invokeHelper(helper, serverURL string) (string, error) {

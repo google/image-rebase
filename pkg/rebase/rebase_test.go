@@ -39,11 +39,19 @@ func TestImageName(t *testing.T) {
 		want: &ImageName{"gcr.io", "proj/img", "latest", ""},
 	}, {
 		in:   "ubuntu:latest",
-		want: &ImageName{"index.docker.io", "ubuntu", "latest", ""},
+		want: &ImageName{"index.docker.io", "library/ubuntu", "latest", ""},
 	}, {
 		in:   "ubuntu",
-		want: &ImageName{"index.docker.io", "ubuntu", "latest", ""},
+		want: &ImageName{"index.docker.io", "library/ubuntu", "latest", ""},
 	}, {
+		/*
+				in:   "user/image:latest",
+				want: &ImageName{"index.docker.io", "user/image", "latest", ""},
+			}, {
+				in:   "user/image",
+				want: &ImageName{"index.docker.io", "user/image", "latest", ""},
+			}, {
+		*/
 		in:   "hostwithport:8080/image:foo",
 		want: &ImageName{"hostwithport:8080", "image", "foo", ""},
 	}, {

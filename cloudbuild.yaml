@@ -1,8 +1,8 @@
 steps:
 - name: 'gcr.io/cloud-builders/bazel'
-  args: ['test', '--spawn_strategy=standalone', '//pkg/...']
+  args: ['test', '--test_output=errors', '--spawn_strategy=standalone', '//pkg/...']
 
-# Build image and retag to this project's repo.
+# Build image and tag to this project's repo.
 - name: 'gcr.io/cloud-builders/bazel'
   args: ['run', '--spawn_strategy=standalone', '--define', 'project=$PROJECT_ID', '//:push']
 
@@ -44,9 +44,9 @@ steps:
 # Perform rebase in the registry, producing image tagged :rebased.
 - name: 'gcr.io/$PROJECT_ID/image-rebase'
   args:
-  - --original=gcr.io/$PROJECT_ID/rebase-test:latest
-  - --old_base=gcr.io/$PROJECT_ID/rebase-base:latest
-  - --new_base=gcr.io/$PROJECT_ID/rebase-newbase:latest
+  - --original=gcr.io/$PROJECT_ID/rebase-test
+  - --old_base=gcr.io/$PROJECT_ID/rebase-base
+  - --new_base=gcr.io/$PROJECT_ID/rebase-newbase
   - --rebased=gcr.io/$PROJECT_ID/rebase-test:rebased
 # Check that rebased image does what *newbase* would have it do.
 - name: 'gcr.io/cloud-builders/docker'
@@ -55,5 +55,14 @@ steps:
   - -c
   - docker run gcr.io/$PROJECT_ID/rebase-test:rebased | grep bar
 
-# Push the rebase image, to capture provenance information.
+# Check that oldbase can have ubuntu rebased out from under it.
+# This tests cross-regsitry layer mirroring.
+- name: gcr.io/$PROJECT_ID/image-rebase
+  args:
+  - --original=gcr.io/$PROJECT_ID/rebase-base
+  - --old_base=ubuntu
+  - --new_base=launcher.gcr.io/google/ubuntu16_04
+  - --rebased=gcr.io/$PROJECT_ID/rebase-base:newubuntu
+
+# Push the image-rebase image, to capture provenance information.
 images: ['gcr.io/$PROJECT_ID/image-rebase']

@@ -26,6 +26,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"strings"
 
 	"github.com/docker/distribution/reference"
 )
@@ -76,13 +78,17 @@ func (r Rebaser) Rebase(orig, oldBase, newBase, rebased *ImageName) error {
 	// If newBase is in another repository (within the same registry) as
 	// rebased, we need to mount those layers into rebased's repository
 	// first.
-	if err := r.mount(rebased, newBase, newData.manifest); err != nil {
-		return err
+	if newBase.reg != rebased.reg {
+		if err := r.mirror(rebased, newBase, newData.manifest); err != nil {
+			return err
+		}
+	} else {
+		if err := r.mount(rebased, newBase, newData.manifest); err != nil {
+			return err
+		}
 	}
 
 	// Replace base layers, history and diff_ids.
-	// TODO(jasonhall): Require that original image's top layers
-	// includes a LABEL that marks it as a candidate for rebasing on oldBase.
 	origData.manifest.Layers = append(newData.manifest.Layers, origData.manifest.Layers[len(oldData.manifest.Layers):]...)
 	origData.config.History = append(newData.config.History, origData.config.History[len(oldData.config.History):]...)
 	origData.config.RootFS.DiffIDs = append(newData.config.RootFS.DiffIDs, origData.config.RootFS.DiffIDs[len(oldData.config.RootFS.DiffIDs):]...)
@@ -100,7 +106,11 @@ func (r Rebaser) Rebase(orig, oldBase, newBase, rebased *ImageName) error {
 	origData.manifest.Config.Size = len(b)
 
 	// PUT new config blob.
-	if err := r.putBlob(rebased.reg, rebased.repo, origData.manifest.Config.Digest, origData.config); err != nil {
+	blob, err := origData.config.toJSON()
+	if err != nil {
+		return err
+	}
+	if err := r.putBlob(rebased.reg, rebased.repo, origData.manifest.Config.Digest, ioutil.NopCloser(bytes.NewReader(blob))); err != nil {
 		return fmt.Errorf("POST new config blob: %v", err)
 	}
 
@@ -171,10 +181,11 @@ type HTTPError struct {
 }
 
 func (h HTTPError) Error() string {
-	all, _ := ioutil.ReadAll(h.Resp.Body)
-	h.Resp.Body.Close()
-	h.Resp.Body = ioutil.NopCloser(bytes.NewReader(all))
-	return fmt.Sprintf("HTTP error %d\n%s", h.Resp.StatusCode, string(all))
+	b, err := httputil.DumpResponse(h.Resp, true)
+	if err != nil {
+		return err.Error()
+	}
+	return fmt.Sprintf("HTTP error %d\n%s", h.Resp.StatusCode, string(b))
 }
 
 type ImageName struct {
@@ -191,6 +202,9 @@ func FromString(s string) *ImageName {
 	reg, repo := reference.SplitHostname(named)
 	if reg == "" {
 		reg = "index.docker.io"
+		if !strings.Contains("repo", "/") {
+			repo = "library/" + repo
+		}
 	}
 
 	var tag, dig string
@@ -280,12 +294,6 @@ func (r Rebaser) mount(to, from *ImageName, m manifest) error {
 		// Nothing to cross-repository mount.
 		return nil
 	}
-	if to.reg != from.reg {
-		// TODO: Support cross-*registry* mounts by downloading and
-		// re-uploading the blob to the new registry (i.e., mirroring).
-		return fmt.Errorf("Cannot mount cross-registry from %s to %s", from.reg, to.reg)
-	}
-
 	for _, l := range m.Layers {
 		url := fmt.Sprintf("https://%s/v2/%s/blobs/uploads/?mount=%s&from=%s", to.reg, to.repo, l.Digest, from.repo)
 		req, err := http.NewRequest("POST", url, nil)
@@ -298,39 +306,48 @@ func (r Rebaser) mount(to, from *ImageName, m manifest) error {
 			return fmt.Errorf("Error mounting %s from %s to %s", l.Digest, from.repo, to.repo)
 		}
 		// If the blob is successfully mounted, registry will respond with 201 Created.
-		// Otherwise, registry will fall back to standard upload and return 202 Accepted.
-		// Either is acceptable.
 		if resp.StatusCode == http.StatusAccepted {
-			// This status might be returned if the digest or from
-			// params are invalid, or if the registry doesn't
-			// support cross-repo mounts.  TODO: Check whether the
-			// digest exists in the from repository, to determine
-			// whether the registry is telling us it doesn't
-			// support cross-repo mounts.
-			//
-			// In either case, this indicates we need to download
-			// then re-upload the blob to the new repository.
-			// TODO: Download-then-reupload the blob to the new
-			// repository.
-			return HTTPError{resp}
-		}
-		if resp.StatusCode != http.StatusCreated {
+			// This might indicate that the registry doesn't
+			// support cross-repo mount. In that case, attempt to
+			// download-then-upload the blob instead.
+			return r.mirror(to, from, m)
+		} else if resp.StatusCode != http.StatusCreated {
 			return HTTPError{resp}
 		}
 	}
 	return nil
 }
 
+// Download and re-upload each layer in the manifest.
+func (r Rebaser) mirror(to, from *ImageName, m manifest) error {
+	for _, l := range m.Layers {
+		if err := r.mirrorBlob(to, from, l.Digest); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Download and re-upload a single layer by digest.
+func (r Rebaser) mirrorBlob(to, from *ImageName, digest string) error {
+	blob, err := r.getBlob(from.reg, from.repo, digest)
+	if err != nil {
+		return fmt.Errorf("Error fetching blob %s from %s/%s", digest, from.reg, from.repo)
+	}
+
+	if err := r.putBlob(to.reg, to.repo, digest, blob); err != nil {
+		return fmt.Errorf("Error putting blob %s to %s/%s", digest, to.reg, to.repo)
+	}
+	return nil
+}
+
 // "Monolithic upload" from
 // https://docs.docker.com/registry/spec/api/#pushing-an-image
-func (r Rebaser) putBlob(registry, repository, configDigest string, config config) error {
-	b, err := config.toJSON()
-	if err != nil {
-		return err
-	}
+func (r Rebaser) putBlob(registry, repository, digest string, blob io.ReadCloser) error {
+	defer blob.Close()
 	// NB: This upload path is not supported by all registries.
-	url := fmt.Sprintf("https://%s/v2/%s/blobs/uploads/?digest=%s", registry, repository, configDigest)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(b))
+	url := fmt.Sprintf("https://%s/v2/%s/blobs/uploads/?digest=%s", registry, repository, digest)
+	req, err := http.NewRequest("POST", url, blob)
 	if err != nil {
 		return err
 	}
@@ -343,6 +360,21 @@ func (r Rebaser) putBlob(registry, repository, configDigest string, config confi
 		return HTTPError{resp}
 	}
 	return nil
+}
+
+// "Pulling a layer" from
+// https://docs.docker.com/registry/spec/api/#pulling-an-image
+func (r Rebaser) getBlob(registry, repository, layerDigest string) (io.ReadCloser, error) {
+	url := fmt.Sprintf("https://%s/v2/%s/blobs/%s", registry, repository, layerDigest)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := r.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
 }
 
 // "Pushing an image manifest" from
