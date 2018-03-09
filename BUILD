@@ -7,6 +7,7 @@ go_image(
     srcs = ["main.go"],
     deps = [
         "//pkg/rebase:go_default_library",
+        "//pkg/transport:go_default_library",
         "//vendor/golang.org/x/oauth2/google:go_default_library",
     ],
 )
@@ -16,7 +17,7 @@ container_push(
     format = "Docker",
     image = ":image",
     registry = "gcr.io",
-    repository = "$(project)/rebase",
+    repository = "$(project)/image-rebase",
     stamp = True,
 )
 
@@ -34,7 +35,7 @@ go_library(
     visibility = ["//visibility:private"],
     deps = [
         "//pkg/rebase:go_default_library",
-        "//vendor/golang.org/x/oauth2/google:go_default_library",
+        "//pkg/transport:go_default_library",
     ],
 )
 

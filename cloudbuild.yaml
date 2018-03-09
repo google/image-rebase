@@ -1,10 +1,10 @@
 steps:
 - name: 'gcr.io/cloud-builders/bazel'
-  args: ['test', '//pkg/...']
+  args: ['test', '--spawn_strategy=standalone', '//pkg/...']
 
 # Build image and retag to this project's repo.
 - name: 'gcr.io/cloud-builders/bazel'
-  args: ['run', '--define', 'project=$PROJECT_ID', '//:push']
+  args: ['run', '--spawn_strategy=standalone', '--define', 'project=$PROJECT_ID', '//:push']
 
 # Run a simple example that builds two base images and an image based on one,
 # then rebases it on the other.
@@ -42,7 +42,7 @@ steps:
     docker push gcr.io/$PROJECT_ID/rebase-test
     docker push gcr.io/$PROJECT_ID/rebase-newbase
 # Perform rebase in the registry, producing image tagged :rebased.
-- name: 'gcr.io/$PROJECT_ID/rebase'
+- name: 'gcr.io/$PROJECT_ID/image-rebase'
   args:
   - --original=gcr.io/$PROJECT_ID/rebase-test:latest
   - --old_base=gcr.io/$PROJECT_ID/rebase-base:latest
@@ -55,5 +55,5 @@ steps:
   - -c
   - docker run gcr.io/$PROJECT_ID/rebase-test:rebased | grep bar
 
-# Push the rebase image.
-images: ['gcr.io/$PROJECT_ID/rebase']
+# Push the rebase image, to capture provenance information.
+images: ['gcr.io/$PROJECT_ID/image-rebase']
