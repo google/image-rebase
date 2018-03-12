@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -52,17 +53,27 @@ func (r Rebaser) Rebase(orig, oldBase, newBase, rebased *ImageName) error {
 		return fmt.Errorf("Rebased image cannot specify digest")
 	}
 
-	origData, err := r.getImageData(orig)
+	origData, _, err := r.getImageData(orig)
 	if err != nil {
 		return fmt.Errorf("GET original: %v", err)
 	}
 
-	oldData, err := r.getImageData(oldBase)
+	if (oldBase == nil && newBase != nil) || (oldBase != nil && newBase == nil) {
+		return errors.New("oldBase and newBase must both be specified, or neither be specified")
+	}
+	if oldBase == nil && newBase == nil {
+		oldBase, newBase, err = getBasesFromLabel(origData.config)
+		if err != nil {
+			return err
+		}
+	}
+
+	oldData, _, err := r.getImageData(oldBase)
 	if err != nil {
 		return fmt.Errorf("GET old base: %v", err)
 	}
 
-	newData, err := r.getImageData(newBase)
+	newData, newBaseDigest, err := r.getImageData(newBase)
 	if err != nil {
 		return fmt.Errorf("GET new base: %v", err)
 	}
@@ -92,6 +103,15 @@ func (r Rebaser) Rebase(orig, oldBase, newBase, rebased *ImageName) error {
 	origData.manifest.Layers = append(newData.manifest.Layers, origData.manifest.Layers[len(oldData.manifest.Layers):]...)
 	origData.config.History = append(newData.config.History, origData.config.History[len(oldData.config.History):]...)
 	origData.config.RootFS.DiffIDs = append(newData.config.RootFS.DiffIDs, origData.config.RootFS.DiffIDs[len(oldData.config.RootFS.DiffIDs):]...)
+
+	// Write the "rebase" LABEL for future automatic rebase detection.
+	if !newBase.isDigest() {
+		if origData.config.Config.Labels == nil {
+			origData.config.Config.Labels = map[string]string{}
+		}
+		was := &ImageName{reg: newBase.reg, repo: newBase.repo, dig: newBaseDigest}
+		origData.config.Config.Labels["rebase"] = fmt.Sprintf("%s %s", was, newBase)
+	}
 
 	// Calculate new digest and size of config blob.
 	h := sha256.New()
@@ -153,6 +173,9 @@ type config struct {
 		DiffIDs []string `json:"diff_ids"`
 		Type    string   `json:"type"`
 	} `json:"rootfs"`
+	Config struct {
+		Labels map[string]string `json:"labels"`
+	} `json:"config"`
 }
 
 func configFromJSON(b []byte) (*config, error) {
@@ -171,7 +194,34 @@ func configFromJSON(b []byte) (*config, error) {
 func (c *config) toJSON() ([]byte, error) {
 	c.allData["history"] = c.History
 	c.allData["rootfs"] = c.RootFS
+	c.allData["config"].(map[string]interface{})["labels"] = c.Config.Labels
 	return json.Marshal(c.allData)
+}
+
+func getBasesFromLabel(c config) (*ImageName, *ImageName, error) {
+	lbl, found := c.Config.Labels["rebase"]
+	if !found {
+		return nil, nil, errors.New("Could not find LABEL indicating bases")
+	}
+	parts := strings.Split(lbl, " ")
+	if len(parts) < 2 {
+		return nil, nil, fmt.Errorf("Malformed rebase LABEL: %s", lbl)
+	}
+	oldBase := FromString(parts[0])
+	if oldBase == nil {
+		return nil, nil, fmt.Errorf("Malformed old base from LABEL: %s", parts[0])
+	}
+	if !oldBase.isDigest() {
+		return nil, nil, fmt.Errorf("oldBase from LABEL must be digest: %s", oldBase)
+	}
+	newBase := FromString(parts[1])
+	if newBase == nil {
+		return nil, nil, fmt.Errorf("Malformed new base from LABEL: %s", parts[1])
+	}
+	if newBase.isDigest() {
+		return nil, nil, fmt.Errorf("newBase from LABEL must not be digest: %s", newBase)
+	}
+	return oldBase, newBase, nil
 }
 
 // HTTPError represents an HTTP error encountered during rebasing.
@@ -192,7 +242,17 @@ type ImageName struct {
 	reg, repo, tag, dig string
 }
 
+func (i *ImageName) String() string {
+	if i.isDigest() {
+		return fmt.Sprintf("%s/%s@%s", i.reg, i.repo, i.dig)
+	}
+	return fmt.Sprintf("%s/%s:%s", i.reg, i.repo, i.tag)
+}
+
 func FromString(s string) *ImageName {
+	if s == "" {
+		return nil
+	}
 	ref, err := reference.Parse(s)
 	if err != nil {
 		log.Printf("Failed to parse image name: %v", err)
@@ -237,31 +297,37 @@ func (i ImageName) isDigest() bool {
 
 // "Get Manifest" from
 // https://docs.docker.com/registry/spec/api/#pulling-an-image
-func (r Rebaser) getImageData(name *ImageName) (*imageData, error) {
+func (r Rebaser) getImageData(name *ImageName) (*imageData, string, error) {
 	url := fmt.Sprintf("https://%s/v2/%s/manifests/%s", name.reg, name.repo, name.tagOrDigest())
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	req.Header.Set("Accept", accept)
 	resp, err := r.Client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, HTTPError{resp}
+		return nil, "", HTTPError{resp}
 	}
 	defer resp.Body.Close()
 	var m manifest
 	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	// Next, look up the config file blob and decode it from JSON.
 	config, err := r.getConfig(name.reg, name.repo, m.Config.Digest)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return &imageData{m, *config}, nil
+
+	// Get digest of image, if it wasn't already specified by digest.
+	digest := name.dig
+	if !name.isDigest() {
+		digest = resp.Header.Get("Docker-Content-Digest")
+	}
+	return &imageData{m, *config}, digest, nil
 }
 
 // "Get blob" from

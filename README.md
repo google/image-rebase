@@ -119,4 +119,48 @@ the `original` tag, perform some sanity checks, then tag the image to the
 There is ongoing work to standardize and advertise base image contract
 adherence to make rebasing safer.
 
-### This is not an official Google product
+## Automatic Rebase Seam Detection
+
+If an app image adheres to a strong contract with its base layers, the tool
+that builds the app image can insert a hint into the image, in the form of a
+`LABEL`, to help `image-rebase` detect the values of `--old_base` and
+`--new_base` automatically.
+
+The form of the `LABEL` is:
+
+```
+LABEL rebase <current-base-image-by-digest> <current-base-image-by-tag>
+```
+
+When `image-rebase` is asked to rebase an image without being passed
+`--old_base` and `--new_base` explicitly, it will look for this label and fill
+in `--old_base=<base-by-digest>` and `--new_base=<base-by-tag>`.
+
+In this way, new releases of `<base-by-tag>` will automatically be considered
+as `--new_base` for the app image, if the flags aren't passed explicitly.
+
+The `image-rebase` tool injects this `LABEL` into the `--rebased` image it
+produces, if `--new_base` is passed as a tag, to aid future rebase operations
+on that image.
+
+Using the example above, `gcr.io/my-project/my-app:rebased` contains the following label:
+
+```
+LABEL rebase launcher.gcr.io/google/ubuntu16_04@sha256:facadecafe... launcher.gcr.io/google/ubuntu16_04:latest
+```
+
+This supplies a hint to `image-rebase` that if `ubuntu16_04:latest` is updated,
+it should be used as the new base for `:rebased` image, instead of
+`ubuntu16_04@sha256:facadecafe...`, which is its current base.
+
+Future rebase operations can be specified with just two flags:
+
+```
+$ image-rebase \
+  --original=gcr.io/my-project/my-app:rebased \
+  --rebased=gcr.io/my-project/my-app:rebased-again
+```
+
+### This is not an official Google product.
+
+### This code is experimental and might break you if not used correctly.

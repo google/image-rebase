@@ -63,6 +63,44 @@ steps:
   - --old_base=ubuntu
   - --new_base=launcher.gcr.io/google/ubuntu16_04
   - --rebased=gcr.io/$PROJECT_ID/rebase-base:newubuntu
+# Check that the new image can still be run.
+- name: 'gcr.io/$PROJECT_ID/rebase-base:newubuntu'
+# oldbase can have its original ubuntu base rebased under it.
+- name: gcr.io/$PROJECT_ID/image-rebase
+  args:
+  - --original=gcr.io/$PROJECT_ID/rebase-base:newubuntu
+  - --old_base=launcher.gcr.io/google/ubuntu16_04
+  - --new_base=ubuntu
+  - --rebased=gcr.io/$PROJECT_ID/rebase-base:oldubuntu
+# Check that the new image can still be run.
+- name: 'gcr.io/$PROJECT_ID/rebase-base:oldubuntu'
+# TODO: Check that rebase-base:oldubuntu has the same digest as
+# rebase-base:latest
+
+# Now try an automatic rebase of :rebased onto a new :newbase
+- name: 'gcr.io/cloud-builders/docker'
+  entrypoint: 'bash'
+  args:
+  - -c
+  - |
+    # push a new rebase-newbase with new content
+    cat > Dockerfile.newerbase << EOF
+    FROM ubuntu
+    RUN echo ducks > /base.txt
+    EOF
+    docker build -t gcr.io/$PROJECT_ID/rebase-newbase -f Dockerfile.newerbase .
+    docker push gcr.io/$PROJECT_ID/rebase-newbase
+- name: gcr.io/$PROJECT_ID/image-rebase
+  args:
+  - --original=gcr.io/$PROJECT_ID/rebase-test:rebased
+  - --rebased=gcr.io/$PROJECT_ID/rebase-test:auto
+- name: 'gcr.io/cloud-builders/docker'
+  entrypoint: 'bash'
+  args:
+  - -c
+  - |
+    # Check that image FROM base does what base would have it do.
+    docker run gcr.io/$PROJECT_ID/rebase-test:auto | grep ducks
 
 # Push the image-rebase image, to capture provenance information.
 images: ['gcr.io/$PROJECT_ID/image-rebase']
