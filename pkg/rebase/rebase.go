@@ -66,16 +66,23 @@ func (r Rebaser) Rebase(orig, oldBase, newBase, rebased *ImageName) error {
 		if err != nil {
 			return err
 		}
+		fmt.Println("Found LABEL rebase", oldBase, newBase)
 	}
 
-	oldData, _, err := r.getImageData(oldBase)
+	oldData, oldBaseDigest, err := r.getImageData(oldBase)
 	if err != nil {
 		return fmt.Errorf("GET old base: %v", err)
+	}
+	if !oldBase.isDigest() {
+		fmt.Println("Old base", oldBase, "refers to digest", oldBaseDigest)
 	}
 
 	newData, newBaseDigest, err := r.getImageData(newBase)
 	if err != nil {
 		return fmt.Errorf("GET new base: %v", err)
+	}
+	if !newBase.isDigest() {
+		fmt.Println("New base", newBase, "refers to digest", newBaseDigest)
 	}
 
 	// Verify that oldBase's layers are present in orig, otherwise orig is
@@ -111,6 +118,7 @@ func (r Rebaser) Rebase(orig, oldBase, newBase, rebased *ImageName) error {
 		}
 		was := &ImageName{reg: newBase.reg, repo: newBase.repo, dig: newBaseDigest}
 		origData.config.Config.Labels["rebase"] = fmt.Sprintf("%s %s", was, newBase)
+		fmt.Println("Adding LABEL rebase", was, newBase)
 	}
 
 	// Calculate new digest and size of config blob.
@@ -135,9 +143,11 @@ func (r Rebaser) Rebase(orig, oldBase, newBase, rebased *ImageName) error {
 	}
 
 	// PUT new manifest.
-	if err := r.putManifest(rebased, origData.manifest); err != nil {
+	rebasedDigest, err := r.putManifest(rebased, origData.manifest)
+	if err != nil {
 		return fmt.Errorf("PUT new manifest: %v", err)
 	}
+	fmt.Println("Pushed", rebased, "with digest", rebasedDigest)
 
 	return nil
 }
@@ -445,24 +455,24 @@ func (r Rebaser) getBlob(registry, repository, layerDigest string) (io.ReadClose
 
 // "Pushing an image manifest" from
 // https://docs.docker.com/registry/spec/api/#pushing-an-image
-func (r Rebaser) putManifest(name *ImageName, manifest manifest) error {
+func (r Rebaser) putManifest(name *ImageName, manifest manifest) (string, error) {
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(manifest); err != nil {
-		return err
+		return "", err
 	}
 	url := fmt.Sprintf("https://%s/v2/%s/manifests/%s", name.reg, name.repo, name.tag)
 	req, err := http.NewRequest("PUT", url, &buf)
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Accept", accept)
 	resp, err := r.Client.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	// API spec says it should return 201 Created, but we'll accept 200 OK just in case.
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return HTTPError{resp}
+		return "", HTTPError{resp}
 	}
-	return nil
+	return resp.Header.Get("Docker-Content-Digest"), nil
 }
