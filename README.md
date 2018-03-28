@@ -1,5 +1,8 @@
 # Docker Image Rebase
 
+[![Build Status](https://travis-ci.org/google/image-rebase.svg?branch=master)](https://travis-ci.org/google/image-rebase)
+
+
 This tool rewrites an image's manifest to replace layers in a base image with
 layers in another version of that base image. It does so entirely with API calls
 to the registry, so it doesn't have to download or upload full layer blobs at
