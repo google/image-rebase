@@ -24,7 +24,7 @@ addons:
       - bazel
 
 script:
-  - bazel clean && bazel build //cmd/... //pkg/...
+  - bazel clean && bazel build //... --define project=unused
   - bazel clean && bazel test --test_output=errors //pkg/...
 
   # Check for issues with the format of our bazel config files.
