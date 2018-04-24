@@ -19,36 +19,27 @@ package main
 import (
 	"flag"
 	"log"
+	"net/http"
+
+	"github.com/google/go-containerregistry/authn"
 
 	"github.com/google/image-rebase/pkg/rebase"
-	"github.com/google/image-rebase/pkg/transport"
 )
-
-const scope = "https://www.googleapis.com/auth/devstorage.read_write"
 
 var (
 	orig    = flag.String("original", "", "Original image to rebase")
-	oldBase = flag.String("old_base", "", "Old base to remove")
+	oldBase = flag.String("old_base", "", "Old base to remove") // TODO: Detect old base using LABEL?
 	newBase = flag.String("new_base", "", "New base to replace with")
 	rebased = flag.String("rebased", "", "New rebased image tag to push") // Default to --original ?
 )
 
 func main() {
 	flag.Parse()
-
-	if *orig == "" {
-		log.Fatal("Must specify --original")
-	}
-	if *rebased == "" {
-		log.Fatal("Must specify --rebased")
-	}
-
-	r := rebase.Rebaser{transport.NewDockerCredsClient(nil)}
-	if err := r.Rebase(
-		rebase.FromString(*orig),
-		rebase.FromString(*oldBase),
-		rebase.FromString(*newBase),
-		rebase.FromString(*rebased),
+	if err := rebase.New(authn.DefaultKeychain, http.DefaultTransport).Rebase(
+		*orig,
+		*oldBase,
+		*newBase,
+		*rebased,
 	); err != nil {
 		log.Fatalf("Rebase: %v", err)
 	}

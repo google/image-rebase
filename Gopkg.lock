@@ -2,16 +2,26 @@
 
 
 [[projects]]
-  name = "github.com/docker/distribution"
+  branch = "master"
+  name = "github.com/google/go-containerregistry"
   packages = [
-    "digest",
-    "reference"
+    "authn",
+    "name",
+    "v1",
+    "v1/empty",
+    "v1/mutate",
+    "v1/partial",
+    "v1/random",
+    "v1/remote",
+    "v1/remote/transport",
+    "v1/types",
+    "v1/v1util"
   ]
-  version = "v2.6.2"
+  revision = "89818f055a73a3249f89337a2aa4f3792a816080"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "e8c1341065607f9420d118705d621e379caffb425f03cd535da5cd7d6d5bb8d5"
+  inputs-digest = "4178b5f3b45deeebe15f25059444a1bceee55aaeb2ab068e441de099e610a981"
   solver-name = "gps-cdcl"
   solver-version = 1
