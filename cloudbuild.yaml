@@ -77,8 +77,8 @@ steps:
 # :detected.
 - name: 'gcr.io/$PROJECT_ID/rebase'
   args:
-  - --original=gcr.io/$PROJECT_ID/rebase-test:latest
-  - --rebased=gcr.io/$PROJECT_ID/rebase-test:rebased
+  - --original=gcr.io/$PROJECT_ID/rebase-test:rebased
+  - --rebased=gcr.io/$PROJECT_ID/rebase-test:detected
 
 # Check that rebased image does what *newbase* would have it do.
 - name: 'gcr.io/cloud-builders/docker'

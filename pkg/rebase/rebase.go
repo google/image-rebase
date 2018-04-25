@@ -128,12 +128,16 @@ func (r Rebaser) Rebase(origStr, oldBaseStr, newBaseStr, rebasedStr string) erro
 		if err != nil {
 			return fmt.Errorf("could not determine digest of %q: %v", newBaseRef, err)
 		}
+		newBaseDigRefStr := fmt.Sprintf("%s@%s", newBaseRef.Context(), dig)
+		if _, err := name.NewDigest(newBaseDigRefStr, name.WeakValidation); err != nil {
+			return fmt.Errorf("could not parse digest reference %q: %v", newBaseDigRefStr, err)
+		}
 		tag := newBaseRef.String()
 		if rebasedConfig.Labels == nil {
 			rebasedConfig.Labels = map[string]string{}
 		}
-		rebasedConfig.Labels["rebase"] = fmt.Sprintf("%s %s", dig, tag)
-		fmt.Println("Adding LABEL rebase", dig, tag)
+		rebasedConfig.Labels["rebase"] = fmt.Sprintf("%s %s", newBaseDigRefStr, tag)
+		fmt.Println("Adding LABEL rebase", rebasedConfig.Labels["rebase"])
 	}
 	rebasedImage, err := mutate.Config(empty.Image, rebasedConfig)
 	if err != nil {
