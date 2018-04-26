@@ -28,7 +28,7 @@ import (
 
 var (
 	orig    = flag.String("original", "", "Original image to rebase")
-	oldBase = flag.String("old_base", "", "Old base to remove") // TODO: Detect old base using LABEL?
+	oldBase = flag.String("old_base", "", "Old base to remove")
 	newBase = flag.String("new_base", "", "New base to replace with")
 	rebased = flag.String("rebased", "", "New rebased image tag to push") // Default to --original ?
 )
