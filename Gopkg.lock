@@ -17,7 +17,7 @@
     "v1/types",
     "v1/v1util"
   ]
-  revision = "4f6b76b9c2580f1126fd55029124e4cb7f86d269"
+  revision = "0d41acd52a1411a440f0cd3071cfecbeb8c8cf52"
 
 [solve-meta]
   analyzer-name = "dep"
