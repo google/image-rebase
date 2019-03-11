@@ -1,6 +1,8 @@
 # Docker Image Rebase
 
-## This repo is obsolete, see
+## This repo is obsolete
+
+See
 [go-containerregistry](https://godoc.org/github.com/google/go-containerregistry)'s
 [`mutate.Rebase`](https://godoc.org/github.com/google/go-containerregistry/pkg/v1/mutate#Rebase)
 instead.
