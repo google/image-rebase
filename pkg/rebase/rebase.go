@@ -23,12 +23,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/go-containerregistry/authn"
-	"github.com/google/go-containerregistry/name"
-	"github.com/google/go-containerregistry/v1"
-	"github.com/google/go-containerregistry/v1/empty"
-	"github.com/google/go-containerregistry/v1/mutate"
-	"github.com/google/go-containerregistry/v1/remote"
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
 // Rebaser provides a method for rebasing Docker images.
@@ -45,24 +44,19 @@ func New(k authn.Keychain, t http.RoundTripper) Rebaser {
 	}
 }
 
-func (r Rebaser) get(s string) (v1.Image, name.Reference, error) {
+func (r Rebaser) get(s string) (v1.Image, error) {
 	ref, err := name.ParseReference(s, name.WeakValidation)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	a, err := r.keychain.Resolve(ref.Context().Registry)
-	if err != nil {
-		return nil, nil, err
-	}
-	img, err := remote.Image(ref, a, r.transport)
-	return img, ref, err
+	return remote.Image(ref, remote.WithAuthFromKeychain(r.keychain), remote.WithTransport(r.transport))
 }
 
 // Rebase constructs and pushes a new image based on orig, with layers from
 // oldBase removed and replaced with those in newBase. The new image is pushed
 // to the reference described by rebased.
 func (r Rebaser) Rebase(origStr, oldBaseStr, newBaseStr, rebasedStr string) error {
-	orig, origRef, err := r.get(origStr)
+	orig, err := r.get(origStr)
 	if err != nil {
 		return fmt.Errorf("could not get original image %q: %v", origStr, err)
 	}
@@ -79,96 +73,24 @@ func (r Rebaser) Rebase(origStr, oldBaseStr, newBaseStr, rebasedStr string) erro
 		fmt.Println("Found LABEL rebase", oldBaseStr, newBaseStr)
 	}
 
-	oldBase, oldBaseRef, err := r.get(oldBaseStr)
+	oldBase, err := r.get(oldBaseStr)
 	if err != nil {
 		return fmt.Errorf("could not get old base image %q: %v", oldBaseStr, err)
 	}
-	newBase, newBaseRef, err := r.get(newBaseStr)
+	newBase, err := r.get(newBaseStr)
 	if err != nil {
 		return fmt.Errorf("could not get new base image %q: %v", newBaseStr, err)
 	}
 
-	// rebasedStr must be a tag, and the image doesn't exist yet.
+	// rebasedStr must be a tag.
 	rebasedRef, err := name.NewTag(rebasedStr, name.WeakValidation)
 	if err != nil {
 		return fmt.Errorf("could not parse rebased tag %q: %v", rebasedStr, err)
 	}
 
-	// Verify that oldBase's layers are present in orig, otherwise orig is
-	// not based on oldBase at all.
-	origLayers, err := orig.Layers()
+	rebased, err := mutate.Rebase(orig, oldBase, newBase)
 	if err != nil {
-		return err
-	}
-	oldBaseLayers, err := oldBase.Layers()
-	if err != nil {
-		return err
-	}
-	if len(oldBaseLayers) > len(origLayers) {
-		return fmt.Errorf("image %q is not based on %q", orig, oldBase)
-	}
-	for i, l := range oldBaseLayers {
-		oldLayerDigest, _ := l.Digest()
-		origLayerDigest, _ := origLayers[i].Digest()
-		if oldLayerDigest != origLayerDigest {
-			return fmt.Errorf("image %q is not based on %q", orig, oldBase)
-		}
-	}
-
-	// Stitch together an image that contains:
-	// - original image's config
-	// - new base image's layers + top of original image's layers
-	// - new base image's history + top of original image's history
-	//
-	// If new base image was specified by tag, write the "rebase" LABEL for
-	// future automatic rebase detection.
-	rebasedConfig := *origConfig.Config.DeepCopy()
-	if _, ok := newBaseRef.(name.Tag); ok {
-		dig, err := newBase.Digest()
-		if err != nil {
-			return fmt.Errorf("could not determine digest of %q: %v", newBaseRef, err)
-		}
-		newBaseDigRefStr := fmt.Sprintf("%s@%s", newBaseRef.Context(), dig)
-		if _, err := name.NewDigest(newBaseDigRefStr, name.WeakValidation); err != nil {
-			return fmt.Errorf("could not parse digest reference %q: %v", newBaseDigRefStr, err)
-		}
-		tag := newBaseRef.String()
-		if rebasedConfig.Labels == nil {
-			rebasedConfig.Labels = map[string]string{}
-		}
-		rebasedConfig.Labels["rebase"] = fmt.Sprintf("%s %s", newBaseDigRefStr, tag)
-		fmt.Println("Adding LABEL rebase", rebasedConfig.Labels["rebase"])
-	}
-	rebasedImage, err := mutate.Config(empty.Image, rebasedConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create empty image with original config: %v", err)
-	}
-	// Get new base layers and config for history.
-	newBaseLayers, err := newBase.Layers()
-	if err != nil {
-		return fmt.Errorf("could not get new base layers for %q: %v", newBaseStr, err)
-	}
-	newConfig, err := newBase.ConfigFile()
-	if err != nil {
-		return fmt.Errorf("could not get config for new base image %q: %v", newBaseStr, err)
-	}
-	for i := range newBaseLayers {
-		rebasedImage, err = mutate.Append(rebasedImage, mutate.Addendum{
-			Layer:   newBaseLayers[i],
-			History: newConfig.History[i],
-		})
-		if err != nil {
-			return fmt.Errorf("failed to append layer %d of new base layers", i)
-		}
-	}
-	for i := range origLayers[len(oldBaseLayers):] {
-		rebasedImage, err = mutate.Append(rebasedImage, mutate.Addendum{
-			Layer:   origLayers[i],
-			History: origConfig.History[i],
-		})
-		if err != nil {
-			return fmt.Errorf("failed to append layer %d of original layers", i)
-		}
+		return fmt.Errorf("error rebasing image: %v", err)
 	}
 
 	// Push the new rebased image.
@@ -176,9 +98,7 @@ func (r Rebaser) Rebase(origStr, oldBaseStr, newBaseStr, rebasedStr string) erro
 	if err != nil {
 		return fmt.Errorf("could not authorize to %q: %v", rebasedRef.Context().Registry, err)
 	}
-	if err := remote.Write(rebasedRef, rebasedImage, a, r.transport, remote.WriteOptions{
-		MountPaths: []name.Repository{origRef.Context(), oldBaseRef.Context(), newBaseRef.Context()},
-	}); err != nil {
+	if err := remote.Write(rebasedRef, rebased, a, r.transport); err != nil {
 		return fmt.Errorf("could not put new image %q: %v", rebasedStr, err)
 	}
 
