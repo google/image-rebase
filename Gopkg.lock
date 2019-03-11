@@ -3,25 +3,43 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:d720f69573a1ccc087046e78b94352da9588b225d0a97cb276921f77c6a3cf1a"
   name = "github.com/google/go-containerregistry"
   packages = [
-    "authn",
-    "name",
-    "v1",
-    "v1/empty",
-    "v1/mutate",
-    "v1/partial",
-    "v1/random",
-    "v1/remote",
-    "v1/remote/transport",
-    "v1/types",
-    "v1/v1util"
+    "pkg/authn",
+    "pkg/name",
+    "pkg/v1",
+    "pkg/v1/empty",
+    "pkg/v1/mutate",
+    "pkg/v1/partial",
+    "pkg/v1/random",
+    "pkg/v1/remote",
+    "pkg/v1/remote/transport",
+    "pkg/v1/stream",
+    "pkg/v1/tarball",
+    "pkg/v1/types",
+    "pkg/v1/v1util",
   ]
-  revision = "0d41acd52a1411a440f0cd3071cfecbeb8c8cf52"
+  pruneopts = "UT"
+  revision = "8c1640add99804503b4126abc718931a4d93c31a"
+
+[[projects]]
+  branch = "master"
+  digest = "1:b521f10a2d8fa85c04a8ef4e62f2d1e14d303599a55d64dabf9f5a02f84d35eb"
+  name = "golang.org/x/sync"
+  packages = ["errgroup"]
+  pruneopts = "UT"
+  revision = "e225da77a7e68af35c70ccbf71af2b83e6acac3c"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "4178b5f3b45deeebe15f25059444a1bceee55aaeb2ab068e441de099e610a981"
+  input-imports = [
+    "github.com/google/go-containerregistry/pkg/authn",
+    "github.com/google/go-containerregistry/pkg/name",
+    "github.com/google/go-containerregistry/pkg/v1",
+    "github.com/google/go-containerregistry/pkg/v1/mutate",
+    "github.com/google/go-containerregistry/pkg/v1/remote",
+  ]
   solver-name = "gps-cdcl"
   solver-version = 1
