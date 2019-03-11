@@ -163,8 +163,8 @@ func (r Rebaser) Rebase(origStr, oldBaseStr, newBaseStr, rebasedStr string) erro
 	}
 	for i := range origLayers[len(oldBaseLayers):] {
 		rebasedImage, err = mutate.Append(rebasedImage, mutate.Addendum{
-			Layer:   origLayers[i],
-			History: origConfig.History[i],
+			Layer:   origLayers[i+len(oldBaseLayers)],
+			History: origConfig.History[i+len(oldBaseLayers)],
 		})
 		if err != nil {
 			return fmt.Errorf("failed to append layer %d of original layers", i)
